@@ -86,20 +86,21 @@ def toFollower(term):
 
 
 def replicate(serverId, successes):
-    while state == LEADER:
-        try:
-            term, success = servers[serverId].surfstore.appendEntries(currentTerm, log, commitIndex)
-            # print(serverId, log)
-            if success:
-                successes[0] += success
-                matchIndex[serverId] = len(log) - 1
-            else:
-                raise Exception('replicate failed')
-            if term > currentTerm:
-                toFollower(term)
-            break
-        except Exception as e:
-            print(str(e))
+    while successes[0] + 1 <= (len(servers) + 1) / 2:
+        if state == LEADER:
+            try:
+                term, success = servers[serverId].surfstore.appendEntries(currentTerm, log, commitIndex)
+                # print(serverId, log)
+                if success:
+                    successes[0] += 1
+                    matchIndex[serverId] = len(log) - 1
+                    break
+                elif term != -1:
+                    raise Exception('replicate failed')
+                if term > currentTerm:
+                    toFollower(term)
+            except Exception as e:
+                print(str(e))
 
 
 # Update a file's fileinfo entry
@@ -175,14 +176,16 @@ def isCrashed():
 # Requests vote from this server to become the leader
 def requestVote(term, candidateId, lastLogIndex, lastLogTerm):
     """Requests vote to be the leader"""
-    global timer, votedFor
+    global timer, currentTerm, state, timer, votedFor
 
     if state == CRASHED:
         return -1, False
 
     res = False
     if currentTerm < term:
-        toFollower(term)
+        state = FOLLOWER
+        currentTerm = term
+        votedFor = -1
     if currentTerm == term:
         if (votedFor == -1 or votedFor == candidateId) and \
                 (not log or lastLogIndex >= len(log) - 1 and lastLogTerm >= log[-1][0]):
@@ -248,15 +251,15 @@ def getVote(serverId, votes):
 
 def heartbeat(sc):
     global commitIndex
-    print('heartbeat', log, commitIndex)
     if state == LEADER:
+        print('heartbeat', log, commitIndex)
         for i, server in enumerate(servers):
             try:
                 term, success = server.surfstore.appendEntries(currentTerm, log, commitIndex)
                 if success:
                     matchIndex[i] = len(log) - 1
                 elif term != -1:
-                    raise Exception('heartbeat append failed')
+                    raise Exception('heartbeat failed')
                 if term > currentTerm:
                     toFollower(term)
                     return
@@ -269,7 +272,7 @@ def heartbeat(sc):
         if commitIndex < N - 1:
             commitIndex = N - 1
             commit()
-        sc.enter(0.1, 1, heartbeat, (sc,))
+        sc.enter(0.15, 1, heartbeat, (sc,))
 
 
 # Reads the config file and return host, port and store list of other servers
@@ -358,7 +361,7 @@ if __name__ == "__main__":
 
                 elif state == CANDIDATE:
                     if time() - timer > timeout:
-                        print('candidate timeout')
+                        print('candidate timeout', timeout)
                         currentTerm += 1
                         timer = time()
                         votedFor = serverNum
