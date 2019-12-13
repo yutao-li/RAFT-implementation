@@ -129,6 +129,7 @@ def updatefile(filename, version, blocklist):
             return 0
     commitIndex += 1
     FileInfoMap[filename] = (version, blocklist)
+    sleep(0.5)
     return version
 
 
